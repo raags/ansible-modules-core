@@ -719,7 +719,7 @@ def main():
 
     before = None
     local_mods = False
-    repo_updated = None
+    changed = False
     if (dest and not os.path.exists(gitconfig)) or (not dest and not allow_clone):
         # if there is no git configuration, do a clone operation unless:
         # * the user requested no clone (they just want info)
@@ -730,7 +730,7 @@ def main():
             module.exit_json(changed=True, before=before, after=remote_head)
         # there's no git config, so clone
         clone(git_path, module, repo, dest, remote, depth, version, bare, reference, refspec, verify_commit)
-        repo_updated = True
+        changed = True
     elif not update:
         # Just return having found a repo already in the dest path
         # this does no checking that the repo is the actual repo
@@ -746,28 +746,31 @@ def main():
             if not force:
                 module.fail_json(msg="Local modifications exist in repository (force=no).")
             # if force and in non-check mode, do a reset
-            if not module.check_mode:
+            elif not module.check_mode:
                 reset(git_path, module, dest)
-        # exit if already at desired sha version
+                changed = True
         set_remote_url(git_path, module, repo, dest, remote)
         remote_head = get_remote_head(git_path, module, dest, version, remote, bare)
+        update_repo = True
+        # check if we can skip fetch
         if before == remote_head:
-            if local_mods:
-                module.exit_json(changed=True, before=before, after=remote_head,
-                    msg="Local modifications exist")
-            elif is_remote_tag(git_path, module, dest, repo, version):
-                # if the remote is a tag and we have the tag locally, exit early
+            if is_remote_tag(git_path, module, dest, repo, version):
+                # if the remote is a tag and we have the tag locally
+                # no need to fetch
                 if version in get_tags(git_path, module, dest):
-                    repo_updated = False
+                    update_repo = False
+            elif is_remote_branch(git_path, module, dest, remote, version):
+                    # if the remote is a branch and we have the branch locally
+                    # no need to fetch
+                    if version in get_branches(git_path, module, dest):
+                            update_repo = False
             else:
-                # if the remote is a branch and we have the branch locally, exit early
-                if version in get_branches(git_path, module, dest):
-                    repo_updated = False
-        if repo_updated is None:
+                update_repo = False
+        if update_repo:
             if module.check_mode:
                 module.exit_json(changed=True, before=before, after=remote_head)
             fetch(git_path, module, repo, dest, version, remote, bare, refspec)
-            repo_updated = True
+            changed = True
 
     # switch to version specified regardless of whether
     # we got new revisions from the repository
@@ -775,7 +778,7 @@ def main():
         switch_version(git_path, module, dest, remote, version, verify_commit)
 
     # Deal with submodules
-    submodules_updated = False
+    submodules_changed = False
     if recursive and not bare:
         submodules_updated = submodules_fetch(git_path, module, remote, track_submodules, dest)
 
@@ -788,12 +791,11 @@ def main():
         if submodules_updated:
             # Switch to version specified
             submodule_update(git_path, module, dest, track_submodules)
+            changed = True
 
-    # determine if we changed anything
     after = get_version(module, git_path, dest)
 
-    changed = False
-    if before != after or local_mods or submodules_updated:
+    if before != after:
         changed = True
 
     # cleanup the wrapper script
@@ -804,7 +806,9 @@ def main():
             # No need to fail if the file already doesn't exist
             pass
 
-    module.exit_json(changed=changed, before=before, after=after)
+    module.exit_json(changed=changed, before=before, after=after,
+                     local_mods=local_mods,
+                     submodules_changed=submodules_changed)
 
 # import module snippets
 from ansible.module_utils.basic import *
