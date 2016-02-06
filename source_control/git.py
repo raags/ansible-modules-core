@@ -103,6 +103,15 @@ options:
               repository will be discarded.  Prior to 0.7, this was always
               'yes' and could not be disabled.  Prior to 1.9, the default was
               `yes`
+    clean:
+        required: false
+        default: null
+        choices: [ "ignored", "untracked", "all" ]
+        version_added: "2.1"
+        description:
+            - If C(ignored), clean ignored files and directories in the repository
+            - If C(untracked), clean untracked files and directories in the repository
+            - If C(all), clean both ignored and untracked
     depth:
         required: false
         default: null
@@ -353,16 +362,42 @@ def clone(git_path, module, repo, dest, remote, depth, version, bare,
     if verify_commit:
         verify_commit_sign(git_path, module, dest, version)
 
-def has_local_mods(module, git_path, dest, bare):
+def clean_files(module, git_path, dest, clean):
+    if clean:
+        cmd = [git_path, 'clean', '-f']
+        if clean == 'ignored':
+            cmd.append('-X')
+        elif clean == 'untracked':
+            cmd.append('-d')
+        elif clean == 'all':
+            cmd.append('-Xd')
+
+        module.run_command(cmd, check_rc=True, cwd=dest)
+
+def git_files_status(module, git_path, dest, bare):
+    modified = untracked = ignored = False
     if bare:
-        return False
+        return (modified, untracked, ignored)
 
     cmd = "%s status --porcelain" % (git_path)
     rc, stdout, stderr = module.run_command(cmd, cwd=dest)
     lines = stdout.splitlines()
-    lines = filter(lambda c: not re.search('^\\?\\?.*$', c), lines)
 
-    return len(lines) > 0
+    ignored_re = re.compile(r'\?\? .+')
+    untracked_re = re.compile(r'\!\! .+')
+    for line in lines:
+        if re.match(ignored_re, line):
+            untracked = True
+        elif re.match(untracked_re, line):
+            ignored = True
+        else:
+            modified = True
+
+        if all((modified, untracked, ignored)):
+                # nothing left to search for
+                break
+
+    return (modified, untracked, ignored)
 
 def reset(git_path, module, dest):
     '''
@@ -721,6 +756,8 @@ def main():
             accept_hostkey=dict(default='no', type='bool'),
             key_file=dict(default=None, type='path', required=False),
             ssh_opts=dict(default=None, required=False),
+            clean=dict(default=None, type='str', required=False,
+                       choices=['ignored', 'untracked', 'all']),
             executable=dict(default=None, type='path'),
             bare=dict(default='no', type='bool'),
             recursive=dict(default='yes', type='bool'),
@@ -744,6 +781,7 @@ def main():
     git_path  = module.params['executable'] or module.get_bin_path('git', True)
     key_file  = module.params['key_file']
     ssh_opts  = module.params['ssh_opts']
+    clean     = module.params['clean']
 
     # We screenscrape a huge amount of git commands so use C locale anytime we
     # call run_command()
@@ -779,7 +817,7 @@ def main():
     track_submodules = module.params['track_submodules']
 
     before = None
-    local_mods = False
+    local_mod_files = untracked_files = ignored_files = False
     changed = False
     if (dest and not os.path.exists(gitconfig)) or (not dest and not allow_clone):
         # if there is no git configuration, do a clone operation unless:
@@ -800,9 +838,9 @@ def main():
         module.exit_json(changed=False, before=before, after=before)
     else:
         # else do a pull
-        local_mods = has_local_mods(module, git_path, dest, bare)
+        local_mod_files, untracked_files, ignored_files = git_files_status(module, git_path, dest, bare)
         before = get_version(module, git_path, dest)
-        if local_mods:
+        if local_mod_files:
             # failure should happen regardless of check mode
             if not force:
                 module.fail_json(msg="Local modifications exist in repository (force=no).")
@@ -838,6 +876,12 @@ def main():
     if not bare:
         switch_version(git_path, module, dest, remote, version, verify_commit)
 
+    # clean untracked or ignored files
+    if clean and (untracked_files or ignored_files):
+        # TODO: support check mode
+        clean_files(module, git_path, dest, clean)
+        changed = True
+
     # Deal with submodules
     submodules_changed = False
     if recursive and not bare:
@@ -868,7 +912,9 @@ def main():
             pass
 
     module.exit_json(changed=changed, before=before, after=after,
-                     local_mods=local_mods,
+                     local_mod_files=local_mod_files,
+                     untracked_files=untracked_files,
+                     ignored_files=ignored_files,
                      submodules_changed=submodules_changed)
 
 # import module snippets
