@@ -21,7 +21,7 @@
 DOCUMENTATION = '''
 ---
 module: git
-author: 
+author:
     - "Ansible Core Team"
     - "Michael DeHaan"
 version_added: "0.0.1"
@@ -54,8 +54,8 @@ options:
         choices: [ "yes", "no" ]
         version_added: "1.5"
         description:
-            - if C(yes), adds the hostkey for the repo url if not already 
-              added. If ssh_opts contains "-o StrictHostKeyChecking=no", 
+            - if C(yes), adds the hostkey for the repo url if not already
+              added. If ssh_opts contains "-o StrictHostKeyChecking=no",
               this parameter is ignored.
     ssh_opts:
         required: false
@@ -177,8 +177,8 @@ requirements:
     - git (the command line tool)
 notes:
     - "If the task seems to be hanging, first verify remote host is in C(known_hosts).
-      SSH will prompt user to authorize the first contact with a remote host.  To avoid this prompt, 
-      one solution is to add the remote host public key in C(/etc/ssh/ssh_known_hosts) before calling 
+      SSH will prompt user to authorize the first contact with a remote host.  To avoid this prompt,
+      one solution is to add the remote host public key in C(/etc/ssh/ssh_known_hosts) before calling
       the git module, with the following command: ssh-keyscan -H remote_host.com >> /etc/ssh/ssh_known_hosts."
 '''
 
@@ -207,13 +207,13 @@ import tempfile
 
 def get_submodule_update_params(module, git_path, cwd):
 
-    #or: git submodule [--quiet] update [--init] [-N|--no-fetch] 
-    #[-f|--force] [--rebase] [--reference <repository>] [--merge] 
+    #or: git submodule [--quiet] update [--init] [-N|--no-fetch]
+    #[-f|--force] [--rebase] [--reference <repository>] [--merge]
     #[--recursive] [--] [<path>...]
 
     params = []
 
-    # run a bad submodule command to get valid params    
+    # run a bad submodule command to get valid params
     cmd = "%s submodule update --help" % (git_path)
     rc, stdout, stderr = module.run_command(cmd, cwd=cwd)
     lines = stderr.split('\n')
@@ -226,7 +226,7 @@ def get_submodule_update_params(module, git_path, cwd):
         update_line = update_line.replace(']','')
         update_line = update_line.replace('|',' ')
         parts = shlex.split(update_line)
-        for part in parts:    
+        for part in parts:
             if part.startswith('--'):
                 part = part.replace('--', '')
                 params.append(part)
@@ -274,7 +274,7 @@ def set_git_ssh(ssh_wrapper, key_file, ssh_opts):
         del os.environ["GIT_KEY"]
 
     if key_file:
-        os.environ["GIT_KEY"] = key_file    
+        os.environ["GIT_KEY"] = key_file
 
     if os.environ.get("GIT_SSH_OPTS"):
         del os.environ["GIT_SSH_OPTS"]
@@ -707,17 +707,15 @@ def main():
         set_git_ssh(ssh_wrapper, key_file, ssh_opts)
         module.add_cleanup_file(path=ssh_wrapper)
 
-    # add the git repo's hostkey 
+    # add the git repo's hostkey
     if module.params['ssh_opts'] is not None:
-        if not "-o StrictHostKeyChecking=no" in module.params['ssh_opts']:
+        if "-o StrictHostKeyChecking=no" not in module.params['ssh_opts']:
             add_git_host_key(module, repo, accept_hostkey=module.params['accept_hostkey'])
     else:
         add_git_host_key(module, repo, accept_hostkey=module.params['accept_hostkey'])
 
     recursive = module.params['recursive']
     track_submodules = module.params['track_submodules']
-
-    rc, out, err, status = (0, None, None, None)
 
     before = None
     local_mods = False
